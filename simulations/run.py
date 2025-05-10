@@ -1,6 +1,6 @@
 import gymnasium as gym
 
-from .agents import RandomAgent, run_episode
+from .agents import RandomAgent, StrongBaselineAgent, run_episode
 
 def configure_simulation(env_params=None):
     """Конфигурация параметров симуляции"""
@@ -22,9 +22,27 @@ def run_simulation(agent_type='random', delay=0.5, max_steps=1000, env_params=No
     agents = {
         'random': RandomAgent(env),
     }
-    
+    if agent_type == 'dqn':
+        if agent_params is None:
+            agent_params = {}
+        agent = DQNAgent(env, **agent_params)
+        # Если указан путь к модели, загружаем её
+        if 'model_path' in agent_params:
+            agent.load(agent_params['model_path'])
+            agent.epsilon = 0.0  # Отключаем случайность при демонстрации
+    elif agent_type == 'strong_baseline':
+        if agent_params is None:
+            agent_params = {}
+        agent = StrongBaselineAgent(env, **agent_params)
+        # Если указан путь к модели, загружаем её
+        if 'model_path' in agent_params:
+            agent.load(agent_params['model_path'])
+            agent.epsilon = 0.0  # Отключаем случайность при демонстрации
+            
     if agent_type not in agents:
         raise ValueError(f"Неизвестный тип агента: {agent_type}. Доступные варианты: {list(agents.keys())}")
+    else:
+        agent = agents[agent_type]
     
     return run_episode(
         env=env,

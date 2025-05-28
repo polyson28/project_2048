@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 from datetime import datetime
 from scipy.signal import convolve2d
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 all = [
     "extract_features",
@@ -72,22 +72,13 @@ def edge_occupancy(board: np.ndarray) -> float:
     return float(np.count_nonzero(board[EDGE_MASK] > 0))
 
 
-def potential_merges(board: np.ndarray) -> float:
-    """Count how many adjacent pairs (right & down) are merge‑able."""
-    merges = 0
-    # horizontal pairs
-    merges += np.sum(board[:, :-1] == board[:, 1:])
-    # vertical pairs
-    merges += np.sum(board[:-1, :] == board[1:, :])
-    return float(merges)
-
-
 def smoothness(board: np.ndarray) -> float:
     """Negative sum of |log₂ diff| for all adjacent pairs (higher is smoother)."""
     diff_h = np.abs(log2(board[:, :-1]) - log2(board[:, 1:]))
     diff_v = np.abs(log2(board[:-1, :]) - log2(board[1:, :]))
     # Empty cells (0) were turned into 0 by log2() – treat them as smooth
     return -float(diff_h.sum() + diff_v.sum())
+
 
 def monotonicity(board: np.ndarray) -> float:
     """Higher when rows & cols are consistently increasing or decreasing."""
@@ -135,6 +126,7 @@ def cluster_score(board: np.ndarray) -> float:
                     score += abs(v - board[ni, nj])
     return float(score)
 
+
 def potential_merge_chains(board: np.ndarray) -> float:
     """Count potential merge chains in the board."""
     # This is similar to potential_merges but with different interpretation
@@ -144,6 +136,7 @@ def potential_merge_chains(board: np.ndarray) -> float:
     # vertical pairs
     merges += np.sum(board[:-1, :] == board[1:, :])
     return float(merges)
+
 
 def corner_stability(board: np.ndarray) -> float:
     """Measure how stable the largest tile is in the corner."""
@@ -159,6 +152,7 @@ def corner_stability(board: np.ndarray) -> float:
         return float(stability)
     return 0.0
 
+
 def monotonic_consistency(board: np.ndarray) -> float:
     """Check monotonic row/column consistency."""
     def is_monotonic(arr):
@@ -172,6 +166,7 @@ def monotonic_consistency(board: np.ndarray) -> float:
         if is_monotonic(col):
             score += 1
     return float(score) / 8.0  # Normalize by total rows + cols
+
 
 def snake_weighted_sum(board: np.ndarray) -> float:
     """
@@ -211,6 +206,7 @@ def snake_weighted_sum(board: np.ndarray) -> float:
     
     return float((board * weights).sum())
 
+
 def corner_weighted_sum(board: np.ndarray) -> float:
     """
     Придаем больший вес углам, меньший вес краям, и наименьший вес центру.
@@ -234,6 +230,7 @@ def corner_weighted_sum(board: np.ndarray) -> float:
             weights[i, j] = 1.0 / (1.0 + min_dist)
     
     return float((board * weights).sum())
+
 
 # 1) Horizontal & vertical signed gradient (monotone direction)
 H_GRAD_KERNEL = np.array([[1, -1, 0, 0]])
@@ -268,8 +265,6 @@ def conv_2x2_same_tiles(board: np.ndarray) -> float:
                 same_tiles += 1
     return float(same_tiles)
 
-# 3) Three‑in‑a‑row / column uniform sequences
-
 
 def conv_3_in_row_same_tiles(board: np.ndarray) -> float:
     """Counts horizontal length‑3 sequences with equal non‑zero tiles."""
@@ -292,6 +287,7 @@ def conv_3_in_col_same_tiles(board: np.ndarray) -> float:
                 cnt += 1
     return float(cnt)
 
+
 # Обновляем словарь feature_funcs с новыми функциями
 feature_funcs = {
     "max_tile": max_tile,
@@ -304,7 +300,7 @@ feature_funcs = {
     "corner_max": corner_max,
     "corner_sum": corner_sum,
     "edge_occupancy": edge_occupancy,
-    "potential_merges": potential_merges,
+    "potential_merges": potential_merge_chains,
     "smoothness": smoothness,
     "monotonicity": monotonicity,
     "snake_weighted_sum": snake_weighted_sum,
@@ -322,7 +318,7 @@ feature_funcs = {
 
 feature_names = list(feature_funcs.keys())
 
-def extract_features(board: np.ndarray) -> Dict[str, Any]:
+def extract_features(board: np.ndarray, features: List[str]=feature_names) -> Dict[str, Any]:
     """Compute *all* interpretable features for the given board.
     
     Parameters
@@ -335,7 +331,8 @@ def extract_features(board: np.ndarray) -> Dict[str, Any]:
     dict[str, float]
         Mapping *feature name → value*.
     """
-    return {name: func(board) for name, func in feature_funcs.items()}
+    get_feature_funcs = {val: feature_funcs[val] for val in features}
+    return {name: func(board) for name, func in get_feature_funcs.items()}
 
 
 class MetricsRecorder:

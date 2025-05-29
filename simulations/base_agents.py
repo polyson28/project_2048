@@ -12,7 +12,6 @@ from collections import deque
 import random
 
 from .vizualize_grid import get_tile_value
-from .utils import Conv2048Network, Batch2048Env
 from .features import extract_features
 
 

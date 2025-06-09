@@ -1,7 +1,7 @@
 import gymnasium as gym
 import matplotlib.pyplot as plt 
 import time
-from typing import Callable, Dict, List, Union, Optional
+from typing import Callable, Dict, List, Union, Optional, Literal
 import numpy as np 
 import torch
 import pickle
@@ -298,3 +298,91 @@ def create_dataset(
             print(f"Датасет сохранён в: {path}")
 
     return shifted
+
+
+def preprocess_dataset(
+    data_path: str, 
+    keep_best: Union[int, None]=None, 
+    features_list: list=feature_names, 
+    add_board_features: bool=False, 
+    expand: bool=False, 
+    transform: Literal['divide_by_actions', 'divide_by_state', None]=None, 
+    target_type: Literal['Q-values', 'actions']='Q-values'
+):
+    with open(data_path, "rb") as f:
+        raw_data = pickle.load(f)
+        
+    data = raw_data.copy()
+    if keep_best:
+        # Преобразуем списки в массивы для векторных вычислений
+        episode_ids = np.array(data["episode_ids"], dtype=int)
+        rewards = np.array(data["rewards"], dtype=float)
+
+        ep_scores = {}
+        for ep in np.unique(episode_ids):
+            ep_scores[ep] = rewards[episode_ids == ep].sum()
+
+        best_eps = sorted(ep_scores, key=lambda ep: ep_scores[ep], reverse=True)[:keep_best]
+        mask = np.isin(episode_ids, best_eps)
+
+        for key in list(data.keys()):
+            # Для каждого ключа – заменяем список на «обрезанный» по mask
+            values = data[key]
+            data[key] = [values[i] for i in range(len(values)) if mask[i]]
+        
+    raw_features = np.array(
+        [[row[f] for f in features_list] for row in data["features"]], 
+        dtype=np.float32
+    )
+    
+    if add_board_features: 
+        boards = np.array(data['boards']).reshape(-1, 16)
+        middle_features = np.array([np.concat([b, f]) for b, f in zip(boards, raw_features)])
+    else: 
+        middle_features = raw_features.copy()
+        
+    target = np.asarray(data[target_type], dtype=np.float32) 
+    
+    features = middle_features.copy()
+    if expand:
+        actions = np.arange(4)
+        features_rep = np.repeat(features, 4, axis=0)
+        act_rep = np.tile(actions, len(data['boards'])).reshape(-1, 1) 
+        features_expanded = np.hstack([features_rep, act_rep]) 
+        target_expanded = target.reshape(-1)
+        
+        features = features_expanded.copy()
+        target = target_expanded.copy()
+    
+    if transform == 'divide_by_empty' and 'num_empty' in features_list:
+        idx = features_list.index('num_empty')
+        count_empty = np.array([f[idx] for f in features])
+        
+        mask_dict = {
+            'easy': (count_empty >= 8), 
+            'medium': np.array(count_empty < 8) & np.array(count_empty >= 4), 
+            'hard': (count_empty < 4)
+        }
+        
+        res = []
+        for mask in mask_dict.values():
+            res_i = features[mask]
+            target_i = target[mask]
+            res.append((res_i, target_i))
+            
+        return (res[0], res[1], res[2])
+        
+    if transform == 'divide_by_actions':
+        actions = np.array(data['actions']).reshape(-1, 1)
+        features = np.array([np.concat([f, a]) for f, a in zip(features, actions)])
+        
+        res = []
+        for act in range(4):
+            mask = [f[-1] == act for f in features]
+            res_i = features[mask]
+            target_i = target[mask]
+            res.append((res_i, target_i))
+            
+        return (res[0], res[1], res[2], res[3])
+    
+    return features, target

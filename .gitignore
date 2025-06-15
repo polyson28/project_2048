@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 drl2048
 env_2048
+notebooks/outputs

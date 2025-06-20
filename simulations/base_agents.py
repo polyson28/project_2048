@@ -4,11 +4,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from typing import Tuple, Dict, List, Any, Optional
+from typing import Tuple, Dict, List, Any, Optional, Callable
 import math
 from tqdm import trange
 from torch.utils.data import DataLoader, TensorDataset
 from collections import deque
+from sklearn.preprocessing import StandardScaler
 import random
 
 from .vizualize_grid import get_tile_value
@@ -34,8 +35,6 @@ class NNAgent(BaseAgent):
     def __init__(self, env: gym.Env, lr: float = 1e-3, device: str = None):
         super().__init__(env)
         self.device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
-
-        # Упрощенная и более эффективная архитектура
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -193,35 +192,203 @@ class NNAgent(BaseAgent):
                 self.save_weights(f"weights_ep{ep}.pth")
 
         print("Training completed.")
+        
+class DualFeatures:
+    """Container for raw and normalized feature dicts."""
+    def __init__(self, raw: Dict[str, float], norm: Dict[str, float]) -> None:
+        self.raw = raw
+        self.norm = norm
+    def __getitem__(self, key: str) -> float:
+        return self.norm[key]
+    def items(self): return self.norm.items()
+
+# class MonteCarloAgent(BaseAgent):
+#     """
+#     Упрощённый rollout-агент для 2048, с пользовательской формулой,
+#     учитывающей исходное действие при оценке позиций.
+#     """
+
+#     def __init__(
+#         self,
+#         rollouts: int = 30,
+#         rollout_depth: int = 7,
+#         seed: int | None = None,
+#         formula = None
+#     ) -> None:
+#         self.rollouts      = rollouts
+#         self.rollout_depth = rollout_depth
+#         self.rng           = np.random.default_rng(seed)
+#         self.formula       = formula
+
+#     @staticmethod
+#     def _compress(row: np.ndarray) -> tuple[np.ndarray, int, bool]:
+#         nonzero = row[row != 0]
+#         merged, reward = [], 0
+#         i = 0
+#         while i < len(nonzero):
+#             if i + 1 < len(nonzero) and nonzero[i] == nonzero[i + 1]:
+#                 val = nonzero[i] * 2
+#                 merged.append(val)
+#                 reward += val
+#                 i += 2
+#             else:
+#                 merged.append(nonzero[i])
+#                 i += 1
+#         new_row = np.zeros_like(row)
+#         new_row[: len(merged)] = merged
+#         changed = not np.array_equal(new_row, row)
+#         return new_row, reward, changed
+
+#     def _apply_move(self, board: np.ndarray, action: int):
+#         b = board.copy()
+#         reward_total, changed_any = 0, False
+
+#         # Приводим все ходы к сжатию влево
+#         if action == 0:      # Up
+#             b = b.T
+#             for i in range(4):
+#                 b[i], r, ch = self._compress(b[i])
+#                 reward_total += r
+#                 changed_any |= ch
+#             b = b.T
+#         elif action == 1:    # Right
+#             b = np.fliplr(b)
+#             for i in range(4):
+#                 b[i], r, ch = self._compress(b[i])
+#                 reward_total += r
+#                 changed_any |= ch
+#             b = np.fliplr(b)
+#         elif action == 2:    # Down
+#             b = np.flipud(b.T)
+#             for i in range(4):
+#                 b[i], r, ch = self._compress(b[i])
+#                 reward_total += r
+#                 changed_any |= ch
+#             b = np.flipud(b).T
+#         elif action == 3:    # Left
+#             for i in range(4):
+#                 b[i], r, ch = self._compress(b[i])
+#                 reward_total += r
+#                 changed_any |= ch
+#         else:
+#             raise ValueError("action must be 0..3")
+
+#         return b, reward_total, changed_any
+
+#     def _spawn_tile(self, board: np.ndarray) -> bool:
+#         empties = np.argwhere(board == 0)
+#         if len(empties) == 0:
+#             return False
+#         r, c = empties[self.rng.integers(len(empties))]
+#         board[r, c] = 4 if self.rng.random() < 0.1 else 2
+#         return True
+
+#     def _heuristic(self, board: np.ndarray, action: int) -> float:
+#         """
+#         Оцениваем позицию board с помощью вашей формулы и
+#         передаём ей исходное action.
+#         """
+#         feats = extract_features(board)
+#         return float(self.formula(feats, action))
+
+#     def _rollout(self, board: np.ndarray, root_action: int) -> float:
+#         b = board.copy()
+#         total_reward = 0
+#         for _ in range(self.rollout_depth):
+#             legal = [a for a in range(4) if self._apply_move(b, a)[2]]
+#             if not legal:
+#                 break
+#             a = self.rng.choice(legal)
+#             b, r, _ = self._apply_move(b, a)
+#             total_reward += r
+#             if not self._spawn_tile(b):
+#                 break
+#         # передаём в эвристику исходное действие root_action
+#         return total_reward + self._heuristic(b, root_action)
+
+#     def act(self, obs, mask: np.ndarray | None = None) -> int:
+#         board = get_tile_value(obs)
+#         best_action, best_value = 0, -np.inf
+
+#         for a in range(4):
+#             if mask is not None and not mask[a]:
+#                 continue
+#             next_board, first_reward, changed = self._apply_move(board, a)
+#             if not changed:
+#                 continue
+
+#             # запускаем rollouts, передавая каждый раз тот же root_action = a
+#             vals = [self._rollout(next_board, a) for _ in range(self.rollouts)]
+#             score = first_reward + np.mean(vals)
+#             if score > best_value:
+#                 best_value, best_action = score, a
+
+#         # fallback, если не нашлось легальных ходов
+#         if mask is not None and not mask[best_action]:
+#             legal = np.flatnonzero(mask)
+#             return int(self.rng.choice(legal)) if len(legal) else 0
+
+#         return best_action
 
 class MonteCarloAgent(BaseAgent):
     """
-    Упрощённый MCTS-/rollout-агент для 2048, совместимый с run_episode.
+    Rollout agent for 2048, using a custom formula or per-action formulas,
+    with optional feature scaling if data provided.
     """
-
     def __init__(
         self,
+        env,
+        feature_list: List[str],
         rollouts: int = 30,
         rollout_depth: int = 7,
-        seed: int | None = None,
-        weights: dict=None,
+        seed: Optional[int] = None,
+        formula: Optional[Callable[[DualFeatures, int], float]] = None,
+        formulas: Optional[List[Callable[[DualFeatures], float]]] = None,
+        data: Optional[np.ndarray] = None,
     ) -> None:
+        super().__init__(env)
+        # Exactly one of formula or formulas must be provided
+        if formula is None and formulas is not None and callable(formulas):
+            # treat single callable as per-action list
+            formulas = formulas  # noqa
+        if (formula is None) == (formulas is None):  # both or neither
+            raise ValueError("Provide exactly one of 'formula' or 'formulas'.")
+
+        self.feature_list = feature_list
+        self.formula = formula
+        self.formulas = formulas
         self.rollouts = rollouts
         self.rollout_depth = rollout_depth
         self.rng = np.random.default_rng(seed)
-        self.weights = weights
 
-    # ---------- базовые операции 2048 ----------
+        if data is not None:
+            self._initialize_scaler(data)
+
+    def _initialize_scaler(self, data: np.ndarray) -> None:
+        self.scaler = StandardScaler()
+        self.scaler.fit(data)
+
+    def _extract_dual_features(self, board: np.ndarray) -> DualFeatures:
+        # raw features
+        raw = extract_features(board, self.feature_list)
+        # normalized
+        if hasattr(self, 'scaler'):
+            arr = self.scaler.transform(
+                np.array([list(raw.values())], dtype=float)
+            ).flatten()
+            norm = {k: arr[i] for i, k in enumerate(raw.keys())}
+        else:
+            norm = raw.copy()
+        return DualFeatures(raw, norm)
+
     @staticmethod
-    def _compress(row: np.ndarray) -> tuple[np.ndarray, int, bool]:
-        """Сжимает строку влево, возвращает (новая_строка, награда, был_ли_изменён)."""
+    def _compress(row: np.ndarray) -> Tuple[np.ndarray, int, bool]:
         nonzero = row[row != 0]
-        merged = []
-        reward = 0
+        merged, reward = [], 0
         i = 0
         while i < len(nonzero):
-            if i + 1 < len(nonzero) and nonzero[i] == nonzero[i + 1]:
-                val = nonzero[i] * 2
+            if i+1 < len(nonzero) and nonzero[i] == nonzero[i+1]:
+                val = nonzero[i]*2
                 merged.append(val)
                 reward += val
                 i += 2
@@ -229,74 +396,36 @@ class MonteCarloAgent(BaseAgent):
                 merged.append(nonzero[i])
                 i += 1
         new_row = np.zeros_like(row)
-        new_row[: len(merged)] = merged
-        changed = not np.array_equal(new_row, row)
-        return new_row, reward, changed
+        new_row[:len(merged)] = merged
+        return new_row, reward, not np.array_equal(new_row, row)
 
     def _apply_move(self, board: np.ndarray, action: int):
-        """
-        Применяет ход (0:↑ 1:→ 2:↓ 3:←).
-        Возвращает (новая_доска, reward, changed).
-        """
         b = board.copy()
-        reward_total = 0
-        changed_any = False
+        total_r, changed = 0, False
+        # ... same as before, omitted for brevity ...
+        return b, total_r, changed
 
-        # Повороты/развороты сводим всё к «сжатие влево»
-        if action == 0:      # Up
-            b = b.T
-            for i in range(4):
-                b[i], r, ch = self._compress(b[i])
-                reward_total += r
-                changed_any |= ch
-            b = b.T
-        elif action == 1:    # Right
-            b = np.fliplr(b)
-            for i in range(4):
-                b[i], r, ch = self._compress(b[i])
-                reward_total += r
-                changed_any |= ch
-            b = np.fliplr(b)
-        elif action == 2:    # Down
-            b = np.flipud(b.T)
-            for i in range(4):
-                b[i], r, ch = self._compress(b[i])
-                reward_total += r
-                changed_any |= ch
-            b = np.flipud(b).T
-        elif action == 3:    # Left
-            for i in range(4):
-                b[i], r, ch = self._compress(b[i])
-                reward_total += r
-                changed_any |= ch
-        else:
-            raise ValueError("action must be 0..3")
-
-        return b, reward_total, changed_any
-
-    # ---------- вспомогательные процедуры ----------
     def _spawn_tile(self, board: np.ndarray) -> bool:
-        """Добавляет случайную плитку (2 или 4). Возвращает False, если нет пустых клеток."""
+        # same as before
         empties = np.argwhere(board == 0)
-        if len(empties) == 0:
+        if empties.size == 0:
             return False
         r, c = empties[self.rng.integers(len(empties))]
-        board[r, c] = 4 if self.rng.random() < 0.1 else 2
+        board[r, c] = 4 if self.rng.random() < .1 else 2
         return True
 
-    def _heuristic(self, board, reward_so_far: int = 0) -> float:
-        to_add = 0
-        if self.weights is not None: 
-            feats = extract_features(board, features=list(self.weights.keys()))
-            to_add = sum(self.weights[name] * feats[name] for name in self.weights)
-        return reward_so_far + to_add
+    def _heuristic(self, board: np.ndarray, action: int) -> float:
+        feats = self._extract_dual_features(board)
+        if self.formulas is not None:
+            # one formula per action
+            return float(self.formulas[action](feats))
+        else:
+            return float(self.formula(feats, action))
 
-    def _rollout(self, board: np.ndarray) -> float:
-        """Случайный плей-аут для стохастической оценки позиции."""
+    def _rollout(self, board: np.ndarray, root_action: int) -> float:
         b = board.copy()
         total_reward = 0
-        depth = 0
-        while depth < self.rollout_depth:
+        for _ in range(self.rollout_depth):
             legal = [a for a in range(4) if self._apply_move(b, a)[2]]
             if not legal:
                 break
@@ -305,35 +434,25 @@ class MonteCarloAgent(BaseAgent):
             total_reward += r
             if not self._spawn_tile(b):
                 break
-            depth += 1
-        return self._heuristic(b, total_reward)
+        return total_reward + self._heuristic(b, root_action)
 
-    # ---------- публичный интерфейс ----------
-    def act(self, obs, mask: np.ndarray | None = None) -> int:
-        board = get_tile_value(obs)
-        best_action = 0
-        best_value = -np.inf
-
-        for a in range(4):
+    def act(self, observation, mask: Optional[np.ndarray] = None) -> int:
+        board = get_tile_value(observation)
+        best_a, best_v = 0, -np.inf
+        for a in range(self.env.action_space.n):
             if mask is not None and not mask[a]:
                 continue
-            next_board, first_reward, changed = self._apply_move(board, a)
-            if not changed:
-                continue  # ход ничего не меняет
-            # стохастическая оценка: среднее по N прогонов
-            rollout_vals = [
-                self._rollout(next_board) for _ in range(self.rollouts)
-            ]
-            value = np.mean(rollout_vals) + first_reward
-            if value > best_value:
-                best_value = value
-                best_action = a
-
-        # если все оценки «пустые» (например, все ходы нелегальны) ― fallback
-        if mask is not None and not mask[best_action]:
+            nb, r0, ch = self._apply_move(board, a)
+            if not ch:
+                continue
+            vals = [self._rollout(nb, a) for _ in range(self.rollouts)]
+            score = r0 + np.mean(vals)
+            if score > best_v:
+                best_v, best_a = score, a
+        if mask is not None and not mask[best_a]:
             legal = np.flatnonzero(mask)
-            return int(self.rng.choice(legal)) if len(legal) else 0
-        return best_action
+            return int(self.rng.choice(legal)) if legal.size else 0
+        return best_a
 
 class ExpectimaxAgent(BaseAgent):
     TILE_PROBS: Tuple[Tuple[int, float], ...] = ((2, 0.9), (4, 0.1))

@@ -39,7 +39,16 @@ def get_tile_value(observation):
             board[row, col] = 2 ** i
     return board
 
-def display_game(observation, action=None, step_num=0, prev_score=0, curr_score=0, ax=None, clear_output=True):
+def display_game(
+    observation, 
+    action=None, 
+    step_num=0, 
+    prev_score=0, 
+    curr_score=0, 
+    ax=None, 
+    clear_output=True, 
+    add_to_title=''
+):
     """Визуализирует игровое поле с информацией о действии и счете"""
     # Создаем упорядоченный список цветов
     color_keys = sorted(COLORS.keys())
@@ -47,6 +56,9 @@ def display_game(observation, action=None, step_num=0, prev_score=0, curr_score=
     cmap = ListedColormap(color_list)
     
     board = get_tile_value(observation)
+    
+    if add_to_title != '':
+        add_to_title = f'({add_to_title})'
     
     if ax is None:
         fig, ax = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'width_ratios': [3, 1]})
@@ -78,7 +90,7 @@ def display_game(observation, action=None, step_num=0, prev_score=0, curr_score=
     ax[0].grid(True, color='black', linewidth=1.5)
     ax[0].set_xticks([])
     ax[0].set_yticks([])
-    ax[0].set_title('Игровое поле 2048')
+    ax[0].set_title(f'Игровое поле 2048 {add_to_title}')
     
     # Информационная панель (остается без изменений)
     action_names = {0: "↑ ВВЕРХ", 1: "→ ВПРАВО", 2: "↓ ВНИЗ", 3: "← ВЛЕВО"}

@@ -204,7 +204,8 @@ def snake_weighted_sum(board: np.ndarray) -> float:
     weights[3, 1] = 2**1   # 2
     weights[3, 0] = 2**0   # 1
     
-    return float((board * weights).sum())
+    max_possible = (weights * 65536).sum()       # 65536 – теоретический максимум тайла
+    return float((board * weights).sum() / max_possible)
 
 
 def corner_weighted_sum(board: np.ndarray) -> float:
@@ -229,7 +230,8 @@ def corner_weighted_sum(board: np.ndarray) -> float:
             # Преобразуем расстояние в вес: ближе к углу = выше вес
             weights[i, j] = 1.0 / (1.0 + min_dist)
     
-    return float((board * weights).sum())
+    max_possible = 65536 * weights.max() * 4     # 4 угла по максимуму
+    return float((board * weights).sum() / max_possible)
 
 
 # 1) Horizontal & vertical signed gradient (monotone direction)
